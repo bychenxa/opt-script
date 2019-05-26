@@ -19,6 +19,14 @@ wifidog_Timeout=`nvram get wifidog_Timeout`
 wifidog_MaxConn=`nvram get wifidog_MaxConn`
 wifidog_MACList=`nvram get wifidog_MACList`
 
+wifidog_renum=`nvram get wifidog_renum`
+wifidog_renum=${wifidog_renum:-"0"}
+cmd_log_enable=`nvram get cmd_log_enable`
+cmd_name="wifidog"
+cmd_log=""
+if [ "$cmd_log_enable" = "1" ] || [ "$wifidog_renum" -gt "0" ] ; then
+	cmd_log="$cmd_log2"
+fi
 fi
 
 if [ ! -z "$(echo $scriptfilepath | grep -v "/tmp/script/" | grep wifi_dog)" ]  && [ ! -s /tmp/script/_wifi_dog ]; then
@@ -105,7 +113,7 @@ wifidog_check () {
 wifidog_get_status
 if [ "$wifidog_enable" != "1" ] && [ "$needed_restart" = "1" ] ; then
 	[ ! -z "`pidof wifidog`" ] && logger -t "【wifidog】" "停止 wifidog" && wifidog_close
-	{ eval $(ps -w | grep "$scriptname" | grep -v grep | awk '{print "kill "$1";";}'); exit 0; }
+	{ kill_ps "$scriptname" exit0; exit 0; }
 fi
 if [ "$wifidog_enable" = "1" ] ; then
 	if [ "$needed_restart" = "1" ] ; then
@@ -153,9 +161,9 @@ fi
 $WD_DIR/wdctl stop
 killall wifidog wdctl
 killall -9 wifidog wdctl
-eval $(ps -w | grep "_wifi_dog keep" | grep -v grep | awk '{print "kill "$1";";}')
-eval $(ps -w | grep "_wifi_dog.sh keep" | grep -v grep | awk '{print "kill "$1";";}')
-eval $(ps -w | grep "$scriptname keep" | grep -v grep | awk '{print "kill "$1";";}')
+kill_ps "/tmp/script/_wifi_dog"
+kill_ps "_wifi_dog.sh"
+kill_ps "$scriptname"
 }
 
 wifidog_start () {
@@ -263,13 +271,14 @@ FirewallRuleSet locked-users {
 FWD
 
 chmod 777 "$SVC_PATH"
-$SVC_PATH -c /etc/storage/wifidog.conf &
+eval "$SVC_PATH -c /etc/storage/wifidog.conf $cmd_log" &
 
-sleep 2
+sleep 4
 [ ! -z "`pidof wifidog`" ] && logger -t "【wifidog】" "启动成功" && wifidog_restart o
 [ -z "`pidof wifidog`" ] && logger -t "【wifidog】" "启动失败, 注意检查端口是否有冲突,程序是否下载完整,10 秒后自动尝试重新启动" && sleep 10 && wifidog_restart x
 #wifidog_get_status
 eval "$scriptfilepath keep &"
+exit 0
 }
 
 

@@ -37,6 +37,14 @@ lan_ipaddr=`nvram get lan_ipaddr`
 [ -z "$ss_DNS_Redirect_IP" ] && ss_DNS_Redirect_IP=$lan_ipaddr && nvram set ss_DNS_Redirect_IP=$ss_DNS_Redirect_IP
 [ -z $adbyby_adblocks ] && adbyby_adblocks=0 && nvram set adbyby_adblocks=$adbyby_adblocks
 
+adm_renum=`nvram get adm_renum`
+adm_renum=${adm_renum:-"0"}
+cmd_log_enable=`nvram get cmd_log_enable`
+cmd_name="ADM"
+cmd_log=""
+if [ "$cmd_log_enable" = "1" ] || [ "$adm_renum" -gt "0" ] ; then
+	cmd_log="$cmd_log2"
+fi
 fi
 #检查 dnsmasq 目录参数
 #confdir=`grep "/tmp/ss/dnsmasq.d" /etc/storage/dnsmasq/dnsmasq.conf | sed 's/.*\=//g'`
@@ -58,10 +66,10 @@ adm_mount () {
 
 ss_opt_x=`nvram get ss_opt_x`
 upanPath=""
-[ "$ss_opt_x" = "3" ] && upanPath="`df -m | grep /dev/mmcb | grep "/media" | awk '{print $NF}' | sort -u | awk 'NR==1' `"
-[ "$ss_opt_x" = "4" ] && upanPath="`df -m | grep "/dev/sd" | grep "/media" | awk '{print $NF}' | sort -u | awk 'NR==1' `"
-[ -z "$upanPath" ] && [ "$ss_opt_x" = "1" ] && upanPath="`df -m | grep /dev/mmcb | grep "/media" | awk '{print $NF}' | sort -u | awk 'NR==1' `"
-[ -z "$upanPath" ] && [ "$ss_opt_x" = "1" ] && upanPath="`df -m | grep "/dev/sd" | grep "/media" | awk '{print $NF}' | sort -u | awk 'NR==1' `"
+[ "$ss_opt_x" = "3" ] && upanPath="`df -m | grep /dev/mmcb | grep -E "$(echo $(/usr/bin/find /dev/ -name 'mmcb*') | sed -e 's@/dev/ /dev/@/dev/@g' | sed -e 's@ @|@g')" | grep "/media" | awk '{print $NF}' | sort -u | awk 'NR==1' `"
+[ "$ss_opt_x" = "4" ] && upanPath="`df -m | grep /dev/sd | grep -E "$(echo $(/usr/bin/find /dev/ -name 'sd*') | sed -e 's@/dev/ /dev/@/dev/@g' | sed -e 's@ @|@g')" | grep "/media" | awk '{print $NF}' | sort -u | awk 'NR==1' `"
+[ -z "$upanPath" ] && [ "$ss_opt_x" = "1" ] && upanPath="`df -m | grep /dev/mmcb | grep -E "$(echo $(/usr/bin/find /dev/ -name 'mmcb*') | sed -e 's@/dev/ /dev/@/dev/@g' | sed -e 's@ @|@g')" | grep "/media" | awk '{print $NF}' | sort -u | awk 'NR==1' `"
+[ -z "$upanPath" ] && [ "$ss_opt_x" = "1" ] && upanPath="`df -m | grep /dev/sd | grep -E "$(echo $(/usr/bin/find /dev/ -name 'sd*') | sed -e 's@/dev/ /dev/@/dev/@g' | sed -e 's@ @|@g')" | grep "/media" | awk '{print $NF}' | sort -u | awk 'NR==1' `"
 if [ "$ss_opt_x" = "5" ] ; then
 	# 指定目录
 	opt_cifs_dir=`nvram get opt_cifs_dir`
@@ -69,9 +77,15 @@ if [ "$ss_opt_x" = "5" ] ; then
 		upanPath="$opt_cifs_dir"
 	else
 		logger -t "【opt】" "错误！未找到指定目录 $opt_cifs_dir"
-		upanPath=""
-		[ -z "$upanPath" ] && upanPath="`df -m | grep /dev/mmcb | grep "/media" | awk '{print $NF}' | sort -u | awk 'NR==1' `"
-		[ -z "$upanPath" ] && upanPath="`df -m | grep "/dev/sd" | grep "/media" | awk '{print $NF}' | sort -u | awk 'NR==1' `"
+	fi
+fi
+if [ "$ss_opt_x" = "6" ] ; then
+	opt_cifs_2_dir=`nvram get opt_cifs_2_dir`
+	# 远程共享
+	if mountpoint -q "$opt_cifs_2_dir" && [ -d "$opt_cifs_2_dir" ] ; then
+		upanPath="$opt_cifs_2_dir"
+	else
+		logger -t "【opt】" "错误！未找到指定远程共享目录 $opt_cifs_2_dir"
 	fi
 fi
 echo "$upanPath"
@@ -79,6 +93,7 @@ if [ ! -z "$upanPath" ] ; then
 	logger -t "【ADM】" "已挂载储存设备, 主程序放外置设备存储"
 	initopt
 	mkdir -p $upanPath/ad/7620adm
+	rm -f /tmp/7620adm
 	ln -sf "$upanPath/ad/7620adm" /tmp/7620adm
 	if [ ! -s "$upanPath/ad/7620adm/adm" ] ; then
 		logger -t "【ADM】" "开始下载 7620adm.tgz"
@@ -178,7 +193,7 @@ adm_check () {
 adm_get_status
 if [ "$adm_enable" != "1" ] && [ "$needed_restart" = "1" ] ; then
 	[ ! -z "`pidof adm`" ] && logger -t "【ADM】" "停止 adm" && adm_close
-	{ eval $(ps -w | grep "$scriptname" | grep -v grep | awk '{print "kill "$1";";}'); exit 0; }
+	{ kill_ps "$scriptname" exit0; exit 0; }
 fi
 if [ "$adm_enable" = "1" ] ; then
 	if [ "$needed_restart" = "1" ] ; then
@@ -202,11 +217,11 @@ adm_keep () {
 
 cat > "/tmp/sh_ad_m_keey_k.sh" <<-ADMK
 #!/bin/sh
+source /etc/storage/script/init.sh
 sleep 919
 adm_enable=\`nvram get adm_enable\`
 if [ ! -f /tmp/cron_adb.lock ] && [ "\$adm_enable" = "1" ] ; then
-eval \$(ps -w | grep "$scriptname" | grep -v grep | awk '{print "kill "\$1";";}')
-eval \$(ps -w | grep "$scriptname keep" | grep -v grep | awk '{print "kill "\$1";";}')
+kill_ps "$scriptname"
 eval "$scriptfilepath keep &"
 exit 0
 fi
@@ -218,9 +233,9 @@ killall -9 sh_ad_m_keey_k.sh
 
 rm -f /tmp/cron_adb.lock
 reb="1"
-[ -z $ss_link_1 ] && ss_link_1="email.163.com" && nvram set ss_link_1="email.163.com"
+[ -z $ss_link_1 ] && ss_link_1="www.163.com" && nvram set ss_link_1="www.163.com"
 [ -z $ss_link_2 ] && ss_link_2="www.google.com.hk" && nvram set ss_link_2="www.google.com.hk"
-[ $ss_link_1 == "www.163.com" ] && ss_link_1="email.163.com" && nvram set ss_link_1="email.163.com"
+[ $ss_link_1 == "email.163.com" ] && ss_link_1="www.163.com" && nvram set ss_link_1="www.163.com"
 while true; do
 adm_enable=`nvram get adm_enable`
 [ "$adm_enable" != "1" ] && exit
@@ -232,30 +247,32 @@ if [ ! -f /tmp/cron_adb.lock ] ; then
 		sleep 5
 		reboot
 	fi
-	hash check_network 2>/dev/null && {
-	check_network 3
-	[ "$?" == "0" ] && check=200 || { check=404;  sleep 3; }
+	check=0
+	hash check_network 2>/dev/null && check=1
+	if [ "$check" == "1" ] ; then
+		check_network 3
+		[ "$?" == "0" ] && check=200 || { check=404;  sleep 1; }
 		if [ "$check" == "404" ] ; then
 			check_network 3
 			[ "$?" == "0" ] && check=200 || check=404
 		fi
-	}
-	hash check_network 2>/dev/null || check=404
-	[ "$check" == "404" ] && {
-	curltest=`which curl`
-	if [ -z "$curltest" ] || [ ! -s "`which curl`" ] ; then
-		wget --no-check-certificate -q -T 10 "$ss_link_1" -O /dev/null
-		[ "$?" == "0" ] && check=200 || { check=404;  sleep 3; }
-		if [ "$check" == "404" ] ; then
-			wget --no-check-certificate -q -T 10 "$ss_link_1" -O /dev/null
-			[ "$?" == "0" ] && check=200 || check=404
-		fi
-	else
-		check=`curl -k -s -w "%{http_code}" "$ss_link_1" -o /dev/null`
-		[ "$check" != "200" ] &&  sleep 3
-		[ "$check" != "200" ] && check=`curl -k -s -w "%{http_code}" "$ss_link_1" -o /dev/null`
 	fi
-	}
+	hash check_network 2>/dev/null || check=404
+	if [ "$check" == "404" ] ; then
+		curltest=`which curl`
+		if [ -z "$curltest" ] || [ ! -s "`which curl`" ] ; then
+			wget --no-check-certificate -q -T 10 "$ss_link_1" -O /dev/null
+			[ "$?" == "0" ] && check=200 || { check=404;  sleep 1; }
+			if [ "$check" == "404" ] ; then
+				wget --no-check-certificate -q -T 10 "$ss_link_1" -O /dev/null
+				[ "$?" == "0" ] && check=200 || check=404
+			fi
+		else
+			check=`curl -k -s -w "%{http_code}" "$ss_link_1" -o /dev/null`
+			[ "$check" != "200" ] &&  sleep 1
+			[ "$check" != "200" ] && check=`curl -k -s -w "%{http_code}" "$ss_link_1" -o /dev/null`
+		fi
+	fi
 	if [ "$check" == "200" ] && [ ! -f /tmp/cron_adb.lock ] ; then
 		reb=1
 		PIDS=$(ps -w | grep "/tmp/7620adm/adm" | grep -v "grep" | wc -l)
@@ -266,7 +283,7 @@ if [ ! -f /tmp/cron_adb.lock ] ; then
 			killall -15 adm
 			killall -9 adm
 			sleep 3
-			/tmp/7620adm/adm >/dev/null 2>&1 &
+			/tmp/7620adm/adm &
 			sleep 20
 			reb=`expr $reb + 1`
 		fi
@@ -276,7 +293,7 @@ if [ ! -f /tmp/cron_adb.lock ] ; then
 			killall -15 adm
 			killall -9 adm
 			sleep 3
-			/tmp/7620adm/adm >/dev/null 2>&1 &
+			/tmp/7620adm/adm &
 			sleep 20
 		fi
 		port=$(iptables -t nat -L | grep 'ports 18309' | wc -l)
@@ -357,9 +374,9 @@ killall -9 adm sh_ad_m_keey_k.sh
 [ "$koolproxy_enable" != "1" ] && killall -9 koolproxy sh_ad_kp_keey_k.sh
 rm -f /tmp/adbyby_host.conf
 rm -f /tmp/7620adm.tgz /tmp/cron_adb.lock /tmp/sh_ad_m_keey_k.sh /tmp/cp_rules.lock
-eval $(ps -w | grep "_ad_m keep" | grep -v grep | awk '{print "kill "$1";";}')
-eval $(ps -w | grep "_ad_m.sh keep" | grep -v grep | awk '{print "kill "$1";";}')
-eval $(ps -w | grep "$scriptname keep" | grep -v grep | awk '{print "kill "$1";";}')
+kill_ps "/tmp/script/_ad_m"
+kill_ps "_ad_m.sh"
+kill_ps "$scriptname"
 }
 
 adm_start () {
@@ -412,7 +429,7 @@ if [ -z "`pidof adm`" ] && [ "$adm_enable" = "1" ] && [ ! -f /tmp/cron_adb.lock 
 	cd /tmp/7620adm
 	export PATH='/tmp/7620adm:/etc/storage/bin:/tmp/script:/etc/storage/script:/opt/usr/sbin:/opt/usr/bin:/opt/sbin:/opt/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin'
 	export LD_LIBRARY_PATH=/tmp/7620adm/lib:/lib:/opt/lib
-	/tmp/7620adm/adm >/dev/null 2>&1 &
+	eval "/tmp/7620adm/adm $cmd_log" &
 	if [ "$adbyby_adblocks" = "1" ] ; then
 		logger -t "【ADM】" "加载 第三方自定义 规则, 等候15秒"
 		sleep 15
@@ -434,6 +451,7 @@ logger -t "【ADM】" "守护进程启动"
 adm_cron_job
 #adm_get_status
 eval "$scriptfilepath keep &"
+exit 0
 }
 
 flush_r () {
@@ -465,6 +483,7 @@ if [ "$adbyby_mode_x" == 1 ] && [ -s /tmp/adbyby_host.conf ] ; then
 logger -t "【iptables】" "添加 ipset 转发规则"
 sed -Ei '/adbyby_host.conf|cflist.conf/d' /etc/storage/dnsmasq/dnsmasq.conf
 sed  "s/\/adm_list/\/adbybylist/" -i  /tmp/adbyby_host.conf
+adbyby_whitehost=`nvram get adbyby_whitehost`
 [ ! -z $whitehost ] && sed -Ei "/$(echo $whitehost | tr , \|)/d" /tmp/adbyby_host.conf
 [ -f "$confdir$gfwlist" ] && gfw_black=$(grep "/$gfw_black_list" "$confdir$gfwlist" | sed 's/.*\=//g')
 if [ -s "$confdir$gfwlist" ] && [ -s /tmp/adbyby_host.conf ] && [ ! -z "$gfw_black" ] ; then
@@ -475,7 +494,7 @@ if [ -s "$confdir$gfwlist" ] && [ -s /tmp/adbyby_host.conf ] && [ ! -z "$gfw_bla
 	sed -e '/^\#/d' -e "s/ipset=\///" -e "s/adbybylist//" /tmp/adbyby_host.conf > /tmp/b/adbyby_host去干扰.conf
 	sed -e '/^\#/d' -e "s/ipset=\///" -e "s/$gfw_black_list//" -e "/server=\//d" "$confdir$gfwlist" > /tmp/b/gfwlist去干扰.conf
 	awk 'NR==FNR{a[$0]++} NR>FNR&&a[$0]' /tmp/b/adbyby_host去干扰.conf /tmp/b/gfwlist去干扰.conf > /tmp/b/host相同行.conf
-	[ -s /tmp/ss/cflist.conf ] && sed -e '/^\#/d' -e "s/ipset=\/\./ipset=\//" -e "s/ipset=\//ipset=\/\./" -e "s/ipset=\/\./\./" -e "s/cflist//" /tmp/ss/cflist.conf >> /tmp/b/host相同行.conf
+	[ -s /tmp/cflist.conf ] && sed -e '/^\#/d' -e "s/ipset=\/\./ipset=\//" -e "s/ipset=\//ipset=\/\./" -e "s/ipset=\/\./\./" -e "s/cflist//" /tmp/cflist.conf >> /tmp/b/host相同行.conf
 	if [ -s /tmp/b/host相同行.conf ] ; then
 		logger -t "【iptables】" "gfwlist 规则处理开始"
 		sed -e "s/^/ipset=\//" -e "s/$/adbybylist/" /tmp/b/host相同行.conf > /tmp/b/host相同行2.conf
@@ -485,14 +504,12 @@ if [ -s "$confdir$gfwlist" ] && [ -s /tmp/adbyby_host.conf ] && [ ! -z "$gfw_bla
 		sed -e "s/^/ipset=\//" -e "s/$/cflist/" /tmp/b/host相同行.conf > /tmp/b/list重复.conf
 		cp -a -v /tmp/b/adbyby_host不重复.conf /tmp/adbyby_host.conf
 		cp -a -v /tmp/b/gfwlist不重复.conf "$confdir$gfwlist"
-		#rm -f "$confdir/cflist.conf"
-		#cp -a -v /tmp/b/list重复.conf "$confdir/cflist.conf"
-		cat /tmp/b/list重复.conf >> "$confdir/cflist.conf"
+		grep -v '^#' /tmp/b/list重复.conf | sort -u | grep -v "^$" > /tmp/cflist.conf
 		logger -t "【iptables】" "gfwlist 规则处理完毕"
 	fi
-	grep -v '^#' $confdir/cflist.conf | sort -u | grep -v "^$" > /tmp/ss/cflist.conf
-	grep -v '^#' /tmp/ss/cflist.conf | sort -u | grep -v "^$" > $confdir/cflist.conf
-	echo "conf-file=$confdir/cflist.conf" >> "/etc/storage/dnsmasq/dnsmasq.conf"
+	rm -f $confdir/cflist.conf
+	[ -s /tmp/cflist.conf ] && cp -f /tmp/cflist.conf $confdir/cflist.conf
+	[ -s /tmp/cflist.conf ] && echo "conf-file=/tmp/cflist.conf" >> "/etc/storage/dnsmasq/dnsmasq.conf"
 fi
 echo "conf-file=/tmp/adbyby_host.conf" >> "/etc/storage/dnsmasq/dnsmasq.conf"
 ipset flush cflist
@@ -514,7 +531,7 @@ flush_r
 ipset -F adbybylist &> /dev/null
 ipset destroy adbybylist &> /dev/null
 #ipset -F cflist &> /dev/null
-sed -Ei '/adbyby_host.conf/d' /etc/storage/dnsmasq/dnsmasq.conf
+sed -Ei '/adbyby_host.conf|cflist.conf/d' /etc/storage/dnsmasq/dnsmasq.conf
 restart_dhcpd
 logger -t "【iptables】" "完成删除18309规则"
 }
@@ -630,7 +647,7 @@ done < /tmp/ad_spec_lan.txt
 		[ "$adm_https" = "1" ] && iptables -t nat -I PREROUTING $wifidognx -p tcp -m multiport --dports 80,443,8080 -j AD_BYBY
 		[ "$adm_https" != "1" ] && iptables -t nat -I PREROUTING $wifidognx -p tcp -m multiport --dports 80,8080 -j AD_BYBY
 	fi
-	iptables -t nat -A AD_BYBY_to -p tcp -j REDIRECT --to-port 18309
+	iptables -t nat -A AD_BYBY_to -p tcp -j REDIRECT --to-ports 18309
 	dns_redirect
 	sleep 1
 	gen_include &
@@ -646,9 +663,14 @@ kcptun_enable=`nvram get kcptun_enable`
 [ -z $kcptun_enable ] && kcptun_enable=0 && nvram set kcptun_enable=$kcptun_enable
 kcptun_server=`nvram get kcptun_server`
 if [ "$kcptun_enable" != "0" ] ; then
+if [ -z $(echo $kcptun_server | grep : | grep -v "\.") ] ; then 
 resolveip=`/usr/bin/resolveip -4 -t 4 $kcptun_server | grep -v : | sed -n '1p'`
 [ -z "$resolveip" ] && resolveip=`arNslookup $kcptun_server | sed -n '1p'` 
 kcptun_server=$resolveip
+else
+# IPv6
+kcptun_server=$kcptun_server
+fi
 fi
 
 [ "$kcptun_enable" = "0" ] && kcptun_server=""
@@ -684,6 +706,9 @@ else
 ss_s2_ip=$ss_server2
 fi
 fi
+ss_s1_ip_echo="`echo "$ss_s1_ip" | grep -v ":" `"
+ss_s2_ip_echo="`echo "$ss_s2_ip" | grep -v ":" `"
+kcptun_server_echo="`echo "$kcptun_server" | grep -v ":" `"
 cat <<-EOF | grep -E "^([0-9]{1,3}\.){3}[0-9]{1,3}"
 0.0.0.0/8
 10.0.0.0/8
@@ -707,9 +732,9 @@ cat <<-EOF | grep -E "^([0-9]{1,3}\.){3}[0-9]{1,3}"
 255.255.255.255
 213.183.51.102
 $lan_ipaddr
-$ss_s1_ip
-$ss_s2_ip
-$kcptun_server
+$ss_s1_ip_echo
+$ss_s2_ip_echo
+$kcptun_server_echo
 EOF
 
 }
@@ -837,14 +862,14 @@ rm -f /tmp/arNslookup/$$
 else
 	curltest=`which curl`
 	if [ -z "$curltest" ] || [ ! -s "`which curl`" ] ; then
-		Address=`wget --no-check-certificate --quiet --output-document=- http://119.29.29.29/d?dn=$1`
+		Address="`wget --no-check-certificate --quiet --output-document=- http://119.29.29.29/d?dn=$1`"
 		if [ $? -eq 0 ]; then
-		echo $Address |  sed s/\;/"\n"/g
+		echo "$Address" |  sed s/\;/"\n"/g | grep -E -o '([0-9]+\.){3}[0-9]+'
 		fi
 	else
-		Address=`curl -k http://119.29.29.29/d?dn=$1`
+		Address="`curl -k -s http://119.29.29.29/d?dn=$1`"
 		if [ $? -eq 0 ]; then
-		echo $Address |  sed s/\;/"\n"/g
+		echo "$Address" |  sed s/\;/"\n"/g | grep -E -o '([0-9]+\.){3}[0-9]+'
 		fi
 	fi
 fi
@@ -858,6 +883,64 @@ if [ ! -z "$(echo $scriptfilepath | grep -v "/opt/etc/init")" ] && [ -s "/opt/et
 fi
 
 }
+
+initconfig () {
+
+adm_rules_script="/etc/storage/adm_rules_script.sh"
+if [ ! -f "$adm_rules_script" ] || [ ! -s "$adm_rules_script" ] ; then
+	cat > "$adm_rules_script" <<-\EEE
+[ADM]
+!  ------------------------------ 阿呆喵[ADM] 自定义过滤语法简表---------------------------------
+!  --------------  规则语法基于ABP规则，并进行了字符替换部分的扩展-----------------------------
+! ADM支持绝大多数ABP规则语法, 
+! 所以, 你可以装一个ABP浏览器插件, 然后用它来辅助写规则, 把写好的规则导入ADM自定义规则文件中保存即可正常使用了.
+
+!  ABP规则请参考https://adblockplus.org/zh_CN/filters，下面为大致摘要
+!  "!" 为行注释符，注释行以该符号起始作为一行注释语义，用于规则描述
+!  "*" 为字符通配符，能够匹配0长度或任意长度的字符串。
+!  "^" 为分隔符，可以匹配任何单个字符。
+!  "|" 为管线符号，来表示地址的最前端或最末端  比如 "|http://"  或  |http://www.abc.com/a.js|  
+!  "||" 为子域通配符，方便匹配主域名下的所有子域。比如 "||www.baidu.com"  就可以不要前面的 "http://"
+!  "~" 为排除标识符，通配符能过滤大多数广告，但同时存在误杀, 可以通过排除标识符修正误杀链接。
+!  "@@" 网址白名单, 例如不拦截此条地址   @@|http://www.baidu.com/js/u.js   或者 @@||www.baidu.com/js/u.js
+
+! ## #@# ##&  这3种为元素插入语法 (在语句末尾加 $B , 可以选择插入css语句在</body>前, 默认为</head>)
+!  "##" 为元素选择器标识符，后面跟需要隐藏元素的CSS样式例如 #ad_id  .ad_class
+! "#@#" 元素选择器白名单 
+! "##&" 为JQuery选择器标识符，后面跟需要隐藏元素的JQuery筛选语法, 如 ##&div:has(p)
+!  元素隐藏支持全局规则   ##.ad_text  不需要前面配置域名,对所有页面有效. 简单有效,但误杀会比较多, 慎用.
+
+! 文本替换规则一般人使用较少, 过滤视频规则一般必须使用之;
+!  文本替换选择器标识符, 支持通配符*和？，格式："页面C$s@内容A@内容B@"   意思为 <在使用"某正则模式" 在 "页面C"上用"内容A"替换"内容B" >  ; 
+! 文本替换方式1:  S@   使用正则匹配替换
+! 文本替换方式2:  s@   使用通配符 ?  *  匹配替换  
+!  -------------------------------------------------------------------------------------------
+
+!全局白名单
+!如果你有其他不想过滤的论坛或者网站类的, 可以在自定义里面仿造上面的规则写一条
+!例如 有些人不想过滤 http://www.baidu.com/
+!那么可以在user.txt 自定义中加一条规则  @@|http://$domain=.baidu.com|   保存即可
+
+!新增文本替换规则语法测试样例
+!样例1 使用正则删除某地方(替换 "<p...</p>" 字符串为 "http://www.admflt.com")
+!<p id="lg"><img src="http://www.baidu.com/img/bdlogo.gif" width="270" height="129"></p>
+!||www.baidu.com$S@<p.*<\/p>@http://www.admflt.com@
+!||kafan.cn$s@<div id="hd">@<div id="hd" style="display:none!important">@
+
+!ADM https黑名单写法;参考规则文件 https_black.txt
+!例如
+!B:baidu.com
+!B:taobao.com
+
+
+
+EEE
+	chmod 755 "$adm_rules_script"
+fi
+
+}
+
+initconfig
 
 case $ACTION in
 start)
@@ -902,7 +985,6 @@ update)
 	;;
 update_ad)
 	adm_mount
-	adm_close
 	rm -rf /tmp/7620adm/*
 	adm_restart o
 	adm_restart

@@ -38,6 +38,14 @@ lan_ipaddr=`nvram get lan_ipaddr`
 [ -z "$ss_DNS_Redirect_IP" ] && ss_DNS_Redirect_IP=$lan_ipaddr && nvram set ss_DNS_Redirect_IP=$ss_DNS_Redirect_IP
 [ -z $adbyby_adblocks ] && adbyby_adblocks=0 && nvram set adbyby_adblocks=$adbyby_adblocks
 
+adbyby_renum=`nvram get adbyby_renum`
+adbyby_renum=${adbyby_renum:-"0"}
+cmd_log_enable=`nvram get cmd_log_enable`
+cmd_name="Adbyby"
+cmd_log=""
+if [ "$cmd_log_enable" = "1" ] || [ "$adbyby_renum" -gt "0" ] ; then
+	cmd_log="$cmd_log2"
+fi
 fi
 #检查 dnsmasq 目录参数
 #confdir=`grep "/tmp/ss/dnsmasq.d" /etc/storage/dnsmasq/dnsmasq.conf | sed 's/.*\=//g'`
@@ -59,10 +67,10 @@ adbyby_mount () {
 
 ss_opt_x=`nvram get ss_opt_x`
 upanPath=""
-[ "$ss_opt_x" = "3" ] && upanPath="`df -m | grep /dev/mmcb | grep "/media" | awk '{print $NF}' | sort -u | awk 'NR==1' `"
-[ "$ss_opt_x" = "4" ] && upanPath="`df -m | grep "/dev/sd" | grep "/media" | awk '{print $NF}' | sort -u | awk 'NR==1' `"
-[ -z "$upanPath" ] && [ "$ss_opt_x" = "1" ] && upanPath="`df -m | grep /dev/mmcb | grep "/media" | awk '{print $NF}' | sort -u | awk 'NR==1' `"
-[ -z "$upanPath" ] && [ "$ss_opt_x" = "1" ] && upanPath="`df -m | grep "/dev/sd" | grep "/media" | awk '{print $NF}' | sort -u | awk 'NR==1' `"
+[ "$ss_opt_x" = "3" ] && upanPath="`df -m | grep /dev/mmcb | grep -E "$(echo $(/usr/bin/find /dev/ -name 'mmcb*') | sed -e 's@/dev/ /dev/@/dev/@g' | sed -e 's@ @|@g')" | grep "/media" | awk '{print $NF}' | sort -u | awk 'NR==1' `"
+[ "$ss_opt_x" = "4" ] && upanPath="`df -m | grep /dev/sd | grep -E "$(echo $(/usr/bin/find /dev/ -name 'sd*') | sed -e 's@/dev/ /dev/@/dev/@g' | sed -e 's@ @|@g')" | grep "/media" | awk '{print $NF}' | sort -u | awk 'NR==1' `"
+[ -z "$upanPath" ] && [ "$ss_opt_x" = "1" ] && upanPath="`df -m | grep /dev/mmcb | grep -E "$(echo $(/usr/bin/find /dev/ -name 'mmcb*') | sed -e 's@/dev/ /dev/@/dev/@g' | sed -e 's@ @|@g')" | grep "/media" | awk '{print $NF}' | sort -u | awk 'NR==1' `"
+[ -z "$upanPath" ] && [ "$ss_opt_x" = "1" ] && upanPath="`df -m | grep /dev/sd | grep -E "$(echo $(/usr/bin/find /dev/ -name 'sd*') | sed -e 's@/dev/ /dev/@/dev/@g' | sed -e 's@ @|@g')" | grep "/media" | awk '{print $NF}' | sort -u | awk 'NR==1' `"
 if [ "$ss_opt_x" = "5" ] ; then
 	# 指定目录
 	opt_cifs_dir=`nvram get opt_cifs_dir`
@@ -70,9 +78,15 @@ if [ "$ss_opt_x" = "5" ] ; then
 		upanPath="$opt_cifs_dir"
 	else
 		logger -t "【opt】" "错误！未找到指定目录 $opt_cifs_dir"
-		upanPath=""
-		[ -z "$upanPath" ] && upanPath="`df -m | grep /dev/mmcb | grep "/media" | awk '{print $NF}' | sort -u | awk 'NR==1' `"
-		[ -z "$upanPath" ] && upanPath="`df -m | grep "/dev/sd" | grep "/media" | awk '{print $NF}' | sort -u | awk 'NR==1' `"
+	fi
+fi
+if [ "$ss_opt_x" = "6" ] ; then
+	opt_cifs_2_dir=`nvram get opt_cifs_2_dir`
+	# 远程共享
+	if mountpoint -q "$opt_cifs_2_dir" && [ -d "$opt_cifs_2_dir" ] ; then
+		upanPath="$opt_cifs_2_dir"
+	else
+		logger -t "【opt】" "错误！未找到指定远程共享目录 $opt_cifs_2_dir"
 	fi
 fi
 echo "$upanPath"
@@ -80,6 +94,7 @@ if [ ! -z "$upanPath" ] ; then
 	logger -t "【Adbyby】" "已挂载储存设备, 主程序放外置设备存储"
 	initopt
 	mkdir -p $upanPath/ad/bin
+	rm -f /tmp/bin
 	ln -sf "$upanPath/ad/bin" /tmp/bin
 	if [ -s /etc_ro/7620i.tar.gz ] && [ ! -s "$$upanPath/ad/bin/adbyby" ] ; then
 		logger -t "【Adbyby】" "使用内置主程序"
@@ -91,8 +106,8 @@ if [ ! -z "$upanPath" ] ; then
 		untar.sh $upanPath/ad/7620n.tar.gz $upanPath/ad $upanPath/ad/bin/adbyby
 	fi
 	if [ ! -s "$upanPath/ad/bin/adbyby" ] ; then
-		logger -t "【Adbyby】" "开始下载http://update.adbyby.com/download/7620n.tar.gz"
-		wgetcurl.sh $upanPath/ad/7620n.tar.gz "https://raw.githubusercontent.com/adbyby/Files/master/7620n.tar.gz" 'http://update.adbyby.com/download/7620n.tar.gz' N
+		logger -t "【Adbyby】" "开始下载 adbyby Files"
+		wgetcurl.sh $upanPath/ad/7620n.tar.gz "https://raw.githubusercontent.com/adbyby/Files/master/7620n.tar.gz" 'https://coding.net/u/adbyby/p/linux/git/raw/master/7620n.tar.gz' N
 		untar.sh $upanPath/ad/7620n.tar.gz $upanPath/ad $upanPath/ad/bin/adbyby
 	fi
 else
@@ -108,8 +123,8 @@ else
 		untar.sh /tmp/7620n.tar.gz /tmp /tmp/bin/adbyby
 	fi
 	if [ ! -s "/tmp/bin/adbyby" ] ; then
-		logger -t "【Adbyby】" "开始下载http://update.adbyby.com/download/7620n.tar.gz"
-		wgetcurl.sh /tmp/7620n.tar.gz "https://raw.githubusercontent.com/adbyby/Files/master/7620n.tar.gz" 'http://update.adbyby.com/download/7620n.tar.gz' N
+		logger -t "【Adbyby】" "开始下载 adbyby Files"
+		wgetcurl.sh /tmp/7620n.tar.gz "https://raw.githubusercontent.com/adbyby/Files/master/7620n.tar.gz" 'https://coding.net/u/adbyby/p/linux/git/raw/master/7620n.tar.gz' N
 		untar.sh /tmp/7620n.tar.gz /tmp /tmp/bin/adbyby
 	fi
 fi
@@ -177,7 +192,7 @@ adbyby_check () {
 adbyby_get_status
 if [ "$adbyby_enable" != "1" ] && [ "$needed_restart" = "1" ] ; then
 	[ ! -z "`pidof adbyby`" ] && logger -t "【Adbyby】" "停止 adbyby" && adbyby_close
-	{ eval $(ps -w | grep "$scriptname" | grep -v grep | awk '{print "kill "$1";";}'); exit 0; }
+	{ kill_ps "$scriptname" exit0; exit 0; }
 fi
 if [ "$adbyby_enable" = "1" ] ; then
 	if [ "$needed_restart" = "1" ] ; then
@@ -209,11 +224,11 @@ nvram set adbybyuser3="第三方规则行数:  `sed -n '$=' /tmp/bin/data/user3a
 nvram set adbybyuser="自定义规则行数:  `sed -n '$=' /tmp/bin/data/user_rules.txt | sed s/[[:space:]]//g ` 行"
 cat > "/tmp/sh_ad_byby_keey_k.sh" <<-ADMK
 #!/bin/sh
+source /etc/storage/script/init.sh
 sleep 919
 adbyby_enable=\`nvram get adbyby_enable\`
 if [ ! -f /tmp/cron_adb.lock ] && [ "\$adbyby_enable" = "1" ] ; then
-eval \$(ps -w | grep "$scriptname" | grep -v grep | awk '{print "kill "\$1";";}')
-eval \$(ps -w | grep "$scriptname keep" | grep -v grep | awk '{print "kill "\$1";";}')
+kill_ps "$scriptname"
 eval "$scriptfilepath keep &"
 exit 0
 fi
@@ -225,9 +240,9 @@ killall -9 sh_ad_byby_keey_k.sh
 
 rm -f /tmp/cron_adb.lock
 reb="1"
-[ -z $ss_link_1 ] && ss_link_1="email.163.com" && nvram set ss_link_1="email.163.com"
+[ -z $ss_link_1 ] && ss_link_1="www.163.com" && nvram set ss_link_1="www.163.com"
 [ -z $ss_link_2 ] && ss_link_2="www.google.com.hk" && nvram set ss_link_2="www.google.com.hk"
-[ $ss_link_1 == "www.163.com" ] && ss_link_1="email.163.com" && nvram set ss_link_1="email.163.com"
+[ $ss_link_1 == "email.163.com" ] && ss_link_1="www.163.com" && nvram set ss_link_1="www.163.com"
 while true; do
 adbyby_enable=`nvram get adbyby_enable`
 [ "$adbyby_enable" != "1" ] && exit
@@ -239,30 +254,32 @@ if [ ! -f /tmp/cron_adb.lock ] ; then
 		sleep 5
 		reboot
 	fi
-	hash check_network 2>/dev/null && {
-	check_network 3
-	[ "$?" == "0" ] && check=200 || { check=404;  sleep 3; }
+	check=0
+	hash check_network 2>/dev/null && check=1
+	if [ "$check" == "1" ] ; then
+		check_network 3
+		[ "$?" == "0" ] && check=200 || { check=404;  sleep 1; }
 		if [ "$check" == "404" ] ; then
 			check_network 3
 			[ "$?" == "0" ] && check=200 || check=404
 		fi
-	}
-	hash check_network 2>/dev/null || check=404
-	[ "$check" == "404" ] && {
-	curltest=`which curl`
-	if [ -z "$curltest" ] || [ ! -s "`which curl`" ] ; then
-		wget --no-check-certificate -q -T 10 "$ss_link_1" -O /dev/null
-		[ "$?" == "0" ] && check=200 || { check=404;  sleep 3; }
-		if [ "$check" == "404" ] ; then
-			wget --no-check-certificate -q -T 10 "$ss_link_1" -O /dev/null
-			[ "$?" == "0" ] && check=200 || check=404
-		fi
-	else
-		check=`curl -k -s -w "%{http_code}" "$ss_link_1" -o /dev/null`
-		[ "$check" != "200" ] &&  sleep 3
-		[ "$check" != "200" ] && check=`curl -k -s -w "%{http_code}" "$ss_link_1" -o /dev/null`
 	fi
-	}
+	hash check_network 2>/dev/null || check=404
+	if [ "$check" == "404" ] ; then
+		curltest=`which curl`
+		if [ -z "$curltest" ] || [ ! -s "`which curl`" ] ; then
+			wget --no-check-certificate -q -T 10 "$ss_link_1" -O /dev/null
+			[ "$?" == "0" ] && check=200 || { check=404;  sleep 1; }
+			if [ "$check" == "404" ] ; then
+				wget --no-check-certificate -q -T 10 "$ss_link_1" -O /dev/null
+				[ "$?" == "0" ] && check=200 || check=404
+			fi
+		else
+			check=`curl -k -s -w "%{http_code}" "$ss_link_1" -o /dev/null`
+			[ "$check" != "200" ] &&  sleep 1
+			[ "$check" != "200" ] && check=`curl -k -s -w "%{http_code}" "$ss_link_1" -o /dev/null`
+		fi
+	fi
 	if [ "$check" == "200" ] && [ ! -f /tmp/cron_adb.lock ] ; then
 		reb=1
 		PIDS=$(ps -w | grep "/tmp/bin/adbyby" | grep -v "grep" | grep -v "adbybyupdate.sh" | grep -v "adbybyfirst.sh" | wc -l)
@@ -273,7 +290,7 @@ if [ ! -f /tmp/cron_adb.lock ] ; then
 			killall -15 adbyby
 			killall -9 adbyby
 			sleep 3
-			/tmp/bin/adbyby >/dev/null 2>&1 &
+			/tmp/bin/adbyby &
 			sleep 20
 			reb=`expr $reb + 1`
 		fi
@@ -283,7 +300,7 @@ if [ ! -f /tmp/cron_adb.lock ] ; then
 			killall -15 adbyby
 			killall -9 adbyby
 			sleep 3
-			/tmp/bin/adbyby >/dev/null 2>&1 &
+			/tmp/bin/adbyby &
 			sleep 20
 		fi
 		port=$(iptables -t nat -L | grep 'ports 8118' | wc -l)
@@ -367,32 +384,28 @@ killall -9 adbyby sh_ad_byby_keey_k.sh
 [ "$koolproxy_enable" != "1" ] && killall -15 koolproxy sh_ad_kp_keey_k.sh
 [ "$koolproxy_enable" != "1" ] && killall -9 koolproxy sh_ad_kp_keey_k.sh
 rm -f /tmp/7620n.tar.gz /tmp/cron_adb.lock /tmp/adbyby_host_backup.conf /tmp/sh_ad_byby_keey_k.sh
-eval $(ps -w | grep "_ad_byby keep" | grep -v grep | awk '{print "kill "$1";";}')
-eval $(ps -w | grep "_ad_byby.sh keep" | grep -v grep | awk '{print "kill "$1";";}')
-eval $(ps -w | grep "$scriptname keep" | grep -v grep | awk '{print "kill "$1";";}')
+kill_ps "/tmp/script/_ad_byby"
+kill_ps "_ad_byby.sh"
+kill_ps "$scriptname"
 }
 
 
 update_ad_rules () {
 
 xwhyc_rules="$hiboyfile/video.txt"
-xwhyc_rules3="$hiboyfile2/video.txt"
-xwhyc_rules2="http://update.adbyby.com/rule3/video.jpg"
+xwhyc_rules2="https://opt.cn2qq.com/opt-file/video.txt"
 xwhyc_rules1="https://raw.githubusercontent.com/adbyby/xwhyc-rules/master/video.txt"
 xwhyc_rules0="https://coding.net/u/adbyby/p/xwhyc-rules/git/raw/master/video.txt"
 logger -t "【Adbyby】" "下载规则:$xwhyc_rules"
-wgetcurl.sh /tmp/bin/data/video.txt $xwhyc_rules0 $xwhyc_rules1 N 5
-[ ! -s /tmp/bin/data/video.txt ] && wgetcurl.sh /tmp/bin/data/video.txt $xwhyc_rules2 $xwhyc_rules2 N 5
-[ ! -s /tmp/bin/data/video.txt ] && wgetcurl.sh /tmp/bin/data/video.txt $xwhyc_rules $xwhyc_rules3 N 5
+wgetcurl.sh /tmp/bin/data/video.txt $xwhyc_rules $xwhyc_rules1 N 5
+[ ! -s /tmp/bin/data/video.txt ] && wgetcurl.sh /tmp/bin/data/video.txt $xwhyc_rules $xwhyc_rules0 N 5
 xwhyc_rules="$hiboyfile/lazy.txt"
-xwhyc_rules3="$hiboyfile2/lazy.txt"
-xwhyc_rules2="http://update.adbyby.com/rule3/lazy.jpg"
+xwhyc_rules2="https://opt.cn2qq.com/opt-file/lazy.txt"
 xwhyc_rules1="https://raw.githubusercontent.com/adbyby/xwhyc-rules/master/lazy.txt"
 xwhyc_rules0="https://coding.net/u/adbyby/p/xwhyc-rules/git/raw/master/lazy.txt"
 logger -t "【Adbyby】" "下载规则:$xwhyc_rules"
-wgetcurl.sh /tmp/bin/data/lazy.txt $xwhyc_rules0 $xwhyc_rules1 N 100
-[ ! -s /tmp/bin/data/lazy.txt ] && wgetcurl.sh /tmp/bin/data/lazy.txt $xwhyc_rules2 $xwhyc_rules2 N 100
-[ ! -s /tmp/bin/data/lazy.txt ] && wgetcurl.sh /tmp/bin/data/lazy.txt $xwhyc_rules $xwhyc_rules3 N 100
+wgetcurl.sh /tmp/bin/data/lazy.txt $xwhyc_rules $xwhyc_rules1 N 100
+[ ! -s /tmp/bin/data/lazy.txt ] && wgetcurl.sh /tmp/bin/data/lazy.txt $xwhyc_rules $xwhyc_rules0 N 100
 
 }
 
@@ -411,37 +424,33 @@ if [ -z "`pidof adbyby`" ] && [ "$adbyby_enable" = "1" ] && [ ! -f /tmp/cron_adb
 	done 
 	adbyby_mount
 	sed -e '/^$/d' -i /etc/storage/dnsmasq/hosts
-	sed -e '/.*127.0.0.1.*update.adbyby.com.*/d' -i /etc/storage/dnsmasq/hosts
-	sed -e '/.*119.147.134.192.*update.adbyby.com/d' -i /etc/storage/dnsmasq/hosts
-	sed -e '/.*210.14.141.213.*update.adbyby.com/d' -i /etc/storage/dnsmasq/hosts
-	sed -Ei '/.*update.adbyby.com\/180.76.76.76.*/d' /etc/storage/dnsmasq/dnsmasq.servers
 	sed -e '/^$/d' -i /etc/storage/dnsmasq/dnsmasq.servers
 	restart_dhcpd
 	[ -s /tmp/bin/data/video.txt ] && rm -f /tmp/bin/data/video.txt /tmp/bin/data/video_B.txt
 	[ -s /tmp/bin/data/lazy.txt ] && rm -f /tmp/bin/data/lazy.txt /tmp/bin/data/lazy_B.txt
-	logger -t "【Adbyby】" "测试下载规则"
-	curltest=`which curl`
-	if [ -z "$curltest" ] || [ ! -s "`which curl`" ] ; then
-		wget --no-check-certificate -q -T 10 http://update.adbyby.com/rule3/video.jpg -O /dev/null
-		[ "$?" == "0" ] && check=200 || check=404
-	else
-		check=`curl --connect-timeout 10 -k -s -w "%{http_code}" "http://update.adbyby.com/rule3/video.jpg" -o /dev/null`
-		[ "$check" != "200" ] && {
-		wget --no-check-certificate -q -T 10 http://update.adbyby.com/rule3/video.jpg -O /dev/null
-		[ "$?" == "0" ] && check=200 || check=404
-		}
-	fi
-	if [ "$check" == "200" ] ; then
-		logger -t "【Adbyby】" "测试下载规则成功"
-		echo "[$LOGTIME] update.adbyby.com have no problem."
-		rm -rf /tmp/bin/data/video_B.txt /tmp/bin/data/lazy_B.txt
-	else
+	# logger -t "【Adbyby】" "测试下载规则"
+	# curltest=`which curl`
+	# if [ -z "$curltest" ] || [ ! -s "`which curl`" ] ; then
+		# wget --no-check-certificate -q -T 10 http://update.adbyby.com/rule3/video.jpg -O /dev/null
+		# [ "$?" == "0" ] && check=200 || check=404
+	# else
+		# check=`curl --connect-timeout 10 -k -s -w "%{http_code}" "http://update.adbyby.com/rule3/video.jpg" -o /dev/null`
+		# if [ "$check" != "200" ] ; then
+			# wget --no-check-certificate -q -T 10 http://update.adbyby.com/rule3/video.jpg -O /dev/null
+			# [ "$?" == "0" ] && check=200 || check=404
+		# fi
+	# fi
+	# if [ "$check" == "200" ] ; then
+		# logger -t "【Adbyby】" "测试下载规则成功"
+		# echo "[$LOGTIME] update.adbyby.com have no problem."
+		# rm -rf /tmp/bin/data/video_B.txt /tmp/bin/data/lazy_B.txt
+	# else
 		mkdir -p /tmp/bin/data
-		logger -t "【Adbyby】" "测试下载规则失败, 强制 手动同步更新规则"
+		# logger -t "【Adbyby】" "测试下载规则失败, 强制 手动同步更新规则"
 		update_ad_rules
 		[ -s /tmp/bin/data/video.txt ] && mv -f /tmp/bin/data/video.txt /tmp/bin/data/video_B.txt
 		[ -s /tmp/bin/data/lazy.txt ] && mv -f /tmp/bin/data/lazy.txt /tmp/bin/data/lazy_B.txt
-	fi
+	# fi
 	chmod 777 /tmp/bin/adbyby
 	# 设置路由ip:8118
 	lan_ipaddr="0.0.0.0" #`nvram get lan_ipaddr`
@@ -499,7 +508,7 @@ if [ -z "`pidof adbyby`" ] && [ "$adbyby_enable" = "1" ] && [ ! -f /tmp/cron_adb
 		[ -s /tmp/bin/data/video_B.txt ] && mv -f /tmp/bin/data/video_B.txt /tmp/bin/data/video.txt
 	fi
 	logger -t "【Adbyby】" "启动 adbyby 程序"
-	/tmp/bin/adbyby >/dev/null 2>&1 &
+	eval "/tmp/bin/adbyby $cmd_log" &
 	if [ "$adbyby_adblocks" = "1" ] ; then
 		logger -t "【Adbyby】" "加载 第三方自定义 规则, 等候10秒"
 		sleep 10
@@ -513,7 +522,7 @@ if [ -z "`pidof adbyby`" ] && [ "$adbyby_enable" = "1" ] && [ ! -f /tmp/cron_adb
 		update_ad_rules
 		killall adbyby
 		killall -9 adbyby
-		/tmp/bin/adbyby >/dev/null 2>&1 &
+		eval "/tmp/bin/adbyby $cmd_log" &
 		sleep 10
 	fi
 fi
@@ -544,6 +553,7 @@ logger -t "【Adbyby】" "守护进程启动"
 adbyby_cron_job
 #adbyby_get_status
 eval "$scriptfilepath keep &"
+exit 0
 }
 
 flush_r () {
@@ -579,6 +589,7 @@ if [ -s "$confdir$gfwlist" ] && [ -s /tmp/adbyby_host.conf ] && [ ! -z "$gfw_bla
 	sed -e '/^\#/d' -e "s/ipset=\///" -e "s/adbybylist//" /tmp/adbyby_host.conf > /tmp/b/adbyby_host去干扰.conf
 	sed -e '/^\#/d' -e "s/ipset=\///" -e "s/$gfw_black_list//" -e "/server=\//d" "$confdir$gfwlist" > /tmp/b/gfwlist去干扰.conf
 	awk 'NR==FNR{a[$0]++} NR>FNR&&a[$0]' /tmp/b/adbyby_host去干扰.conf /tmp/b/gfwlist去干扰.conf > /tmp/b/host相同行.conf
+	[ -s /tmp/cflist.conf ] && sed -e '/^\#/d' -e "s/ipset=\/\./ipset=\//" -e "s/ipset=\//ipset=\/\./" -e "s/ipset=\/\./\./" -e "s/cflist//" /tmp/cflist.conf >> /tmp/b/host相同行.conf
 	if [ -s /tmp/b/host相同行.conf ] ; then
 		logger -t "【iptables】" "gfwlist 规则处理开始"
 		sed -e "s/^/ipset=\//" -e "s/$/adbybylist/" /tmp/b/host相同行.conf > /tmp/b/host相同行2.conf
@@ -588,14 +599,12 @@ if [ -s "$confdir$gfwlist" ] && [ -s /tmp/adbyby_host.conf ] && [ ! -z "$gfw_bla
 		sed -e "s/^/ipset=\//" -e "s/$/cflist/" /tmp/b/host相同行.conf > /tmp/b/list重复.conf
 		cp -a -v /tmp/b/adbyby_host不重复.conf /tmp/adbyby_host.conf
 		cp -a -v /tmp/b/gfwlist不重复.conf "$confdir$gfwlist"
-		#rm -f "$confdir/cflist.conf"
-		#cp -a -v /tmp/b/list重复.conf "$confdir/cflist.conf"
-		cat /tmp/b/list重复.conf >> "$confdir/cflist.conf"
+		grep -v '^#' /tmp/b/list重复.conf | sort -u | grep -v "^$" > /tmp/cflist.conf
 		logger -t "【iptables】" "gfwlist 规则处理完毕"
 	fi
-	grep -v '^#' $confdir/cflist.conf | sort -u | grep -v "^$" > /tmp/ss/cflist.conf
-	grep -v '^#' /tmp/ss/cflist.conf | sort -u | grep -v "^$" > $confdir/cflist.conf
-	echo "conf-file=$confdir/cflist.conf" >> "/etc/storage/dnsmasq/dnsmasq.conf"
+	rm -f $confdir/cflist.conf
+	[ -s /tmp/cflist.conf ] && cp -f /tmp/cflist.conf $confdir/cflist.conf
+	[ -s /tmp/cflist.conf ] && echo "conf-file=/tmp/cflist.conf" >> "/etc/storage/dnsmasq/dnsmasq.conf"
 fi
 echo "conf-file=/tmp/adbyby_host.conf" >> "/etc/storage/dnsmasq/dnsmasq.conf"
 ipset flush cflist
@@ -615,7 +624,7 @@ ipset -F adbybylist &> /dev/null
 ipset destroy adbybylist &> /dev/null
 #ipset -F cflist &> /dev/null
 rm -f /tmp/adbyby_host.conf
-sed -Ei '/adbyby_host.conf/d' /etc/storage/dnsmasq/dnsmasq.conf
+sed -Ei '/adbyby_host.conf|cflist.conf/d' /etc/storage/dnsmasq/dnsmasq.conf
 restart_dhcpd
 logger -t "【iptables】" "完成删除8118规则"
 }
@@ -699,7 +708,7 @@ done < /tmp/ad_spec_lan.txt
 	echo "AD_BYBY-number:$wifidogn"
 	logger -t "【iptables】" "AD_BYBY-number:$wifidogn"
 	iptables -t nat -I PREROUTING $wifidognx -p tcp -m multiport --dports 80,8080 -j AD_BYBY
-	iptables -t nat -A AD_BYBY_to -p tcp -j REDIRECT --to-port 8118
+	iptables -t nat -A AD_BYBY_to -p tcp -j REDIRECT --to-ports 8118
 	dns_redirect
 	sleep 1
 	gen_include &
@@ -714,9 +723,14 @@ kcptun_enable=`nvram get kcptun_enable`
 [ -z $kcptun_enable ] && kcptun_enable=0 && nvram set kcptun_enable=$kcptun_enable
 kcptun_server=`nvram get kcptun_server`
 if [ "$kcptun_enable" != "0" ] ; then
+if [ -z $(echo $kcptun_server | grep : | grep -v "\.") ] ; then 
 resolveip=`/usr/bin/resolveip -4 -t 4 $kcptun_server | grep -v : | sed -n '1p'`
 [ -z "$resolveip" ] && resolveip=`arNslookup $kcptun_server | sed -n '1p'` 
 kcptun_server=$resolveip
+else
+# IPv6
+kcptun_server=$kcptun_server
+fi
 fi
 
 [ "$kcptun_enable" = "0" ] && kcptun_server=""
@@ -752,6 +766,9 @@ else
 ss_s2_ip=$ss_server2
 fi
 fi
+ss_s1_ip_echo="`echo "$ss_s1_ip" | grep -v ":" `"
+ss_s2_ip_echo="`echo "$ss_s2_ip" | grep -v ":" `"
+kcptun_server_echo="`echo "$kcptun_server" | grep -v ":" `"
 cat <<-EOF | grep -E "^([0-9]{1,3}\.){3}[0-9]{1,3}"
 0.0.0.0/8
 10.0.0.0/8
@@ -775,9 +792,9 @@ cat <<-EOF | grep -E "^([0-9]{1,3}\.){3}[0-9]{1,3}"
 255.255.255.255
 213.183.51.102
 $lan_ipaddr
-$ss_s1_ip
-$ss_s2_ip
-$kcptun_server
+$ss_s1_ip_echo
+$ss_s2_ip_echo
+$kcptun_server_echo
 EOF
 
 }
@@ -903,14 +920,14 @@ rm -f /tmp/arNslookup/$$
 else
 	curltest=`which curl`
 	if [ -z "$curltest" ] || [ ! -s "`which curl`" ] ; then
-		Address=`wget --no-check-certificate --quiet --output-document=- http://119.29.29.29/d?dn=$1`
+		Address="`wget --no-check-certificate --quiet --output-document=- http://119.29.29.29/d?dn=$1`"
 		if [ $? -eq 0 ]; then
-		echo $Address |  sed s/\;/"\n"/g
+		echo "$Address" |  sed s/\;/"\n"/g | grep -E -o '([0-9]+\.){3}[0-9]+'
 		fi
 	else
-		Address=`curl -k http://119.29.29.29/d?dn=$1`
+		Address="`curl -k -s http://119.29.29.29/d?dn=$1`"
 		if [ $? -eq 0 ]; then
-		echo $Address |  sed s/\;/"\n"/g
+		echo "$Address" |  sed s/\;/"\n"/g | grep -E -o '([0-9]+\.){3}[0-9]+'
 		fi
 	fi
 fi
@@ -924,6 +941,138 @@ if [ ! -z "$(echo $scriptfilepath | grep -v "/opt/etc/init")" ] && [ -s "/opt/et
 fi
 
 }
+
+initconfig () {
+
+ad_config_script="/etc/storage/ad_config_script.sh"
+if [ ! -f "$ad_config_script" ] || [ ! -s "$ad_config_script" ] ; then
+	cat > "$ad_config_script" <<-\EEE
+# 广告过滤 访问控制功能
+
+# 内网(LAN)访问控制的默认代理转发设置，
+#    0  默认值, 常规, 未在以下设定的 内网IP 根据 AD配置工作模式 走 AD
+#    1         全局, 未在以下设定的 内网IP 使用全局代理 走 AD
+#    2         绕过, 未在以下设定的 内网IP 不使用 AD
+AD_LAN_AC_IP=0
+nvram set AD_LAN_AC_IP=$AD_LAN_AC_IP
+# =========================================================
+# 内网(LAN)IP设定行为设置, 格式如 b,192.168.1.23, 多个值使用空格隔开
+#   使用 b/g/n 前缀定义主机行为模式, 使用英文逗号与主机 IP 分隔
+#   b: 绕过, 此前缀的主机IP 不使用 AD
+#   g: 全局, 此前缀的主机IP 忽略 AD配置工作模式 使用全局代理 走 AD
+#   n: 常规, 此前缀的主机IP 使用 AD配置工作模式 走 AD
+#   s: https, 此前缀的主机IP 使用 AD配置工作模式 https走 AD
+#   优先级: 绕过 > 全局 > 常规
+# （如多个设置则每一个ip一行,可选项：删除前面的#可生效）
+cat > "/tmp/ad_spec_lan_DOMAIN.txt" <<-\EOF
+#b,192.168.123.115
+#g,192.168.123.116
+#n,192.168.123.117
+#s,192.168.123.118
+#b,099B9A909FD9
+#s,099B9A909FD9
+#g,A9:CB:3A:5F:1F:C7
+
+
+
+EOF
+# =========================================================
+
+# adbyby加载第三方adblock规则 0关闭；1启动（可选项：删除前面的#可生效）
+#【不建议启用第三方规则,有可能破坏规则导致过滤失效】
+nvram set adbyby_adblocks=0
+adblocks=`nvram get adbyby_adblocks`
+cat > "/tmp/rule_DOMAIN.txt" <<-\EOF
+# 【可选多项，会占用内存：删除前面的#可生效，前面添加#停用规则】
+# https://easylist-downloads.adblockplus.org/easylistchina.txt
+
+
+
+EOF
+
+EEE
+	chmod 755 "$ad_config_script"
+fi
+
+adbyby_rules_script="/etc/storage/adbyby_rules_script.sh"
+if [ ! -f "$adbyby_rules_script" ] || [ ! -s "$adbyby_rules_script" ] ; then
+	cat > "$adbyby_rules_script" <<-\EEE
+!  ------------------------------ ADByby 自定义过滤语法简--------------------------------
+!  --------------  规则基于abp规则，并进行了字符替换部分的扩展-----------------------------
+!  ABP规则请参考 https://adblockplus.org/zh_CN/filters ，下面为大致摘要
+!  "!" 为行注释符，注释行以该符号起始作为一行注释语义，用于规则描述。
+!  "*" 为字符通配符，能够匹配0长度或任意长度的字符串，该通配符不能与正则语法混用。
+!  "^" 为分隔符，可以是除了字母、数字或者 _ - . % 之外的任何字符。
+!  "|" 为管线符号，来表示地址的最前端或最末端
+!  "||" 为子域通配符，方便匹配主域名下的所有子域。
+!  "~" 为排除标识符，通配符能过滤大多数广告，但同时存在误杀, 可以通过排除标识符修正误杀链接。
+!  "##" 为元素选择器标识符，后面跟需要隐藏元素的CSS样式例如 #ad_id  .ad_class
+!!  元素隐藏暂不支持全局规则和排除规则
+!! 字符替换扩展
+!  文本替换选择器标识符，后面跟需要替换的文本数据，格式：$s@模式字符串@替换后的文本@
+!  支持通配符*和?
+! 参考以下规则格式添加指定过滤网址
+! adbyby_list【模式二】指定网址过滤 功能
+|http://www.sohu.com/adbyby_list
+!百度广告
+||cbjs.baidu.com/adbyby
+||list.video.baidu.com/adbyby
+||nsclick.baidu.com/adbyby
+||play.baidu.com/adbyby
+||sclick.baidu.com/adbyby
+||tieba.baidu.com/adbyby
+||baidustatic.com/adbyby
+||bdimg.com/adbyby
+||bdstatic.com/adbyby
+||share.baidu.com/adbyby
+||hm.baidu.com/adbyby
+!视频广告
+||v.baidu.com/adbyby
+||1000fr.net/adbyby
+||56.com/adbyby
+||v-56.com/adbyby
+||acfun.com/adbyby
+||acfun.tv/adbyby
+||baofeng.com/adbyby
+||baofeng.net/adbyby
+||cntv.cn/adbyby
+||hoopchina.com.cn/adbyby
+||funshion.com/adbyby
+||fun.tv/adbyby
+||hitvs.cn/adbyby
+||hljtv.com/adbyby
+||iqiyi.com/adbyby
+||qiyi.com/adbyby
+||agn.aty.sohu.com/adbyby
+||itc.cn/adbyby
+||kankan.com/adbyby
+||ku6.com/adbyby
+||letv.com/adbyby
+||letvcloud.com/adbyby
+||letvimg.com/adbyby
+||pplive.cn/adbyby
+||pps.tv/adbyby
+||ppsimg.com/adbyby
+||pptv.com/adbyby
+||v.qq.com/adbyby
+||l.qq.com/adbyby
+||video.sina.com.cn/adbyby
+||tudou.com/adbyby
+||wasu.cn/adbyby
+||analytics-union.xunlei.com/adbyby
+||kankan.xunlei.com/adbyby
+||youku.com/adbyby
+||hunantv.com/adbyby
+||zimuzu.tv/adbyby_list
+! 参考以上规则格式添加指定过滤网址
+
+EEE
+	chmod 755 "$adbyby_rules_script"
+fi
+
+}
+
+initconfig
 
 case $ACTION in
 start)
@@ -955,9 +1104,9 @@ update)
 	killall -9 sh_ad_byby_keey_k.sh
 	checka="/tmp/var/lazy.txt"
 	rm -f /tmp/var/lazy.txt
-	urla="http://update.adbyby.com/rule3/lazy.jpg"
-	urla1="https://coding.net/u/adbyby/p/xwhyc-rules/git/raw/master/lazy.txt"
-	urla2="https://raw.githubusercontent.com/adbyby/xwhyc-rules/master/lazy.txt"
+	urla="https://opt.cn2qq.com/opt-file/lazy.txt"
+	urla1="https://raw.githubusercontent.com/adbyby/xwhyc-rules/master/lazy.txt"
+	urla2="https://coding.net/u/adbyby/p/xwhyc-rules/git/raw/master/lazy.txt"
 	checkb="/tmp/bin/data/lazy.txt"
 	wgetcurl.sh $checka $urla $urla1 N 100
 	[ ! -s $checka ] && wgetcurl.sh $checka $urla $urla2 N 100
@@ -968,9 +1117,9 @@ update)
 		logger -t "【Adbyby】" "更新检查:lazy 不需更新 $urla "
 		checka="/tmp/var/video.txt"
 		rm -f /tmp/var/video.txt
-		urla="http://update.adbyby.com/rule3/video.jpg"
-		urla1="https://coding.net/u/adbyby/p/xwhyc-rules/git/raw/master/video.txt"
-		urla2="https://raw.githubusercontent.com/adbyby/xwhyc-rules/master/video.txt"
+		urla="https://opt.cn2qq.com/opt-file/video.txt"
+		urla1="https://raw.githubusercontent.com/adbyby/xwhyc-rules/master/video.txt"
+		urla2="https://coding.net/u/adbyby/p/xwhyc-rules/git/raw/master/video.txt"
 		checkb="/tmp/bin/data/video.txt"
 		wgetcurl.sh $checka $urla $urla1 N 5
 		[ ! -s $checka ] && wgetcurl.sh $checka $urla $urla2 N 5
@@ -985,7 +1134,6 @@ update)
 	;;
 update_ad)
 	adbyby_mount
-	adbyby_close
 	rm -rf /tmp/bin/*
 	adbyby_restart o
 	adbyby_restart

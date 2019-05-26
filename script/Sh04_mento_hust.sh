@@ -7,8 +7,9 @@ if [ "$mentohust_enable" != "0" ] ; then
 #nvramshow=`nvram showall | grep '=' | grep mentohust | awk '{print gensub(/'"'"'/,"'"'"'\"'"'"'\"'"'"'","g",$0);}'| awk '{print gensub(/=/,"='\''",1,$0)"'\'';";}'` && eval $nvramshow
 mentohust_path=`nvram get mentohust_path`
 [ -z $mentohust_path ] && mentohust_path="/usr/bin/mentohust" && nvram set mentohust_path=$mentohust_path
-mentohust_n=`nvram get mentohust_n`
-[ -z $mentohust_n ] && mentohust_n=$(nvram get wan0_ifname_t) && nvram set mentohust_n=$mentohust_n
+mentohust_n="$(nvram get mentohust_n)"
+[ "$mentohust_n" = "0" ] && mentohust_n="$(nvram get wan0_ifname_t)" && nvram set mentohust_n=$mentohust_n
+[ -z $mentohust_n ] && mentohust_n="$(nvram get wan0_ifname_t)" && nvram set mentohust_n=$mentohust_n
 mentohust_i=`nvram get mentohust_i`
 [ -z $mentohust_i ] && mentohust_i="0.0.0.0" && nvram set mentohust_i=$mentohust_i
 mentohust_m=`nvram get mentohust_m`
@@ -41,6 +42,14 @@ mentohust_f=`nvram get mentohust_f`
 mentohust_u=`nvram get mentohust_u`
 mentohust_p=`nvram get mentohust_p`
 mentohust_mode=`nvram get mentohust_mode`
+mentohust_renum=`nvram get mentohust_renum`
+mentohust_renum=${mentohust_renum:-"0"}
+cmd_log_enable=`nvram get cmd_log_enable`
+cmd_name="MentoHUST"
+cmd_log=""
+if [ "$cmd_log_enable" = "1" ] || [ "$mentohust_renum" -gt "0" ] ; then
+	cmd_log="$cmd_log2"
+fi
 fi
 
 if [ ! -z "$(echo $scriptfilepath | grep -v "/tmp/script/" | grep mento_hust)" ]  && [ ! -s /tmp/script/_mento_hust ]; then
@@ -103,7 +112,7 @@ mentohust_check () {
 mentohust_get_status
 if [ "$mentohust_enable" != "1" ] && [ "$needed_restart" = "1" ] ; then
 	[ ! -z "`pidof mentohust`" ] && logger -t "【MentoHUST】" "停止 mentohust" && mentohust_close
-	{ eval $(ps -w | grep "$scriptname" | grep -v grep | awk '{print "kill "$1";";}'); exit 0; }
+	{ kill_ps "$scriptname" exit0; exit 0; }
 fi
 if [ "$mentohust_enable" = "1" ] ; then
 	if [ "$needed_restart" = "1" ] ; then
@@ -139,9 +148,9 @@ mentohust_close () {
 sed -Ei '/【mentohust】|^$/d' /tmp/script/_opt_script_check
 killall mentohust
 killall -9 mentohust
-eval $(ps -w | grep "_mento_hust keep" | grep -v grep | awk '{print "kill "$1";";}')
-eval $(ps -w | grep "_mento_hust.sh keep" | grep -v grep | awk '{print "kill "$1";";}')
-eval $(ps -w | grep "$scriptname keep" | grep -v grep | awk '{print "kill "$1";";}')
+kill_ps "/tmp/script/_mento_hust"
+kill_ps "_mento_hust.sh"
+kill_ps "$scriptname"
 }
 
 mentohust_start () {
@@ -179,27 +188,28 @@ logger -t "【MentoHUST】" "运行 $mentohust_path"
 
 #保存配置到文件
 if [ ! -f "/etc/storage/mentohust.conf" ] ; then
-	$mentohust_path -u$mentohust_u -p$mentohust_p -n$mentohust_n -i$mentohust_i -m$mentohust_m -g$mentohust_g -s$mentohust_s -o$mentohust_o -t$mentohust_t -e$mentohust_e -r$mentohust_r -l$mentohust_l -a$mentohust_a -d$mentohust_d -b$mentohust_b -v$mentohust_v -f$mentohust_f  -c$mentohust_c -w
-	sleep 1
+	$mentohust_path -u$mentohust_u -p$mentohust_p -n$mentohust_n -i$mentohust_i -m$mentohust_m -g$mentohust_g -s$mentohust_s -o$mentohust_o -t$mentohust_t -e$mentohust_e -r$mentohust_r -l$mentohust_l -a$mentohust_a -d$mentohust_d -b$mentohust_b -v$mentohust_v -f$mentohust_f  -c$mentohust_c -w 
+	sleep 2
 	pids=$(pidof process) && killall -9 $pids
 fi
-
 mentohust_mode=`nvram get mentohust_mode`
 if [ "$mentohust_mode" = "0" ] ; then
 logger -t "【MentoHUST】" "标准模式"
-	$mentohust_path  > /dev/null 2>&1 
+	eval "$mentohust_path $cmd_log" &
 elif [ "$mentohust_mode" = "1" ] ; then
 logger -t "【MentoHUST】" "锐捷模式"
-   $mentohust_path  -y  > /dev/null 2>&1 
+	eval "$mentohust_path  -y $cmd_log" &
 elif [ "$mentohust_mode" = "2" ] ; then
 logger -t "【MentoHUST】" "赛尔模式"
-   $mentohust_path -s8.8.8.8 > /dev/null 2>&1 
+	eval "$mentohust_path -s8.8.8.8 $cmd_log" &
 fi
-sleep 2
+sleep 4
+restart_firewall
 [ ! -z "`pidof mentohust`" ] && logger -t "【MentoHUST】" "启动成功" && mentohust_restart o
 [ -z "`pidof mentohust`" ] && logger -t "【MentoHUST】" "启动失败, 注意检查端口是否有冲突,程序是否下载完整,10 秒后自动尝试重新启动" && sleep 10 && mentohust_restart x
 #mentohust_get_status
 eval "$scriptfilepath keep &"
+exit 0
 }
 
 initopt () {

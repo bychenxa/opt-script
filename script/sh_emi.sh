@@ -17,6 +17,8 @@ chmod 777 /etc/storage/script -R
 logger -t "【WebUI】" "UI 开关遍历状态监测"
 # start all services Sh??_* in /etc/storage/script
 for i in `ls /etc/storage/script/Sh??_* 2>/dev/null` ; do
-    [ ! -x "${i}" ] && continue
-    eval ${i}
+	[ ! -x "${i}" ] && continue
+	eval ${i}
 done
+killall menu_title.sh 
+[ -f /etc/storage/www_sh/menu_title.sh ] && /etc/storage/www_sh/menu_title.sh

@@ -5,6 +5,14 @@ softether_enable=`nvram get softether_enable`
 [ -z $softether_enable ] && softether_enable=0 && nvram set softether_enable=0
 softether_path=`nvram get softether_path`
 [ -z $softether_path ] && softether_path="/opt/softether/vpnserver" && nvram set softether_path=$softether_path
+softether_renum=`nvram get softether_renum`
+softether_renum=${softether_renum:-"0"}
+cmd_log_enable=`nvram get cmd_log_enable`
+cmd_name="softether"
+cmd_log=""
+if [ "$cmd_log_enable" = "1" ] || [ "$softether_renum" -gt "0" ] ; then
+	cmd_log="$cmd_log2"
+fi
 #if [ "$softether_enable" != "0" ] ; then
 #nvramshow=`nvram showall | grep '=' | grep softether | awk '{print gensub(/'"'"'/,"'"'"'\"'"'"'\"'"'"'","g",$0);}'| awk '{print gensub(/=/,"='\''",1,$0)"'\'';";}'` && eval $nvramshow
 
@@ -71,7 +79,7 @@ softether_check () {
 softether_get_status
 if [ "$softether_enable" != "1" ] && [ "$needed_restart" = "1" ] ; then
 	[ ! -z "$(ps -w | grep "$softether_path" | grep -v grep )" ] && logger -t "【softether】" "停止 softether" && softether_close
-	{ eval $(ps -w | grep "$scriptname" | grep -v grep | awk '{print "kill "$1";";}'); exit 0; }
+	{ kill_ps "$scriptname" exit0; exit 0; }
 fi
 if [ "$softether_enable" = "1" ] ; then
 	if [ "$needed_restart" = "1" ] ; then
@@ -79,13 +87,7 @@ if [ "$softether_enable" = "1" ] ; then
 		softether_start
 	else
 		[ -z "$(ps -w | grep "$softether_path" | grep -v grep )" ] && softether_restart
-		port=$(iptables -t filter -L INPUT -v -n --line-numbers | grep dpt:500 | cut -d " " -f 1 | sort -nr | wc -l)
-		if [ "$port" = 0 ] ; then
-		logger -t "【softether】" "允许 500、4500、1701 udp端口通过防火墙"
-		iptables -I INPUT -p udp --destination-port 500 -j ACCEPT
-		iptables -I INPUT -p udp --destination-port 4500 -j ACCEPT
-		iptables -I INPUT -p udp --destination-port 1701 -j ACCEPT
-		fi
+		softether_port_dpt
 	fi
 fi
 }
@@ -117,16 +119,18 @@ done
 softether_close () {
 
 sed -Ei '/【softether】|^$/d' /tmp/script/_opt_script_check
-iptables -D INPUT -p udp --destination-port 500 -j ACCEPT
-iptables -D INPUT -p udp --destination-port 4500 -j ACCEPT
-iptables -D INPUT -p udp --destination-port 1701 -j ACCEPT
+iptables -t filter -D INPUT -p udp --destination-port 500 -j ACCEPT
+iptables -t filter -D INPUT -p udp --destination-port 4500 -j ACCEPT
+iptables -t filter -D INPUT -p udp --destination-port 1701 -j ACCEPT
 [ ! -z "$softether_path" ] && $softether_path stop
-[ ! -z "$softether_path" ] && eval $(ps -w | grep "$softether_path" | grep -v grep | awk '{print "kill "$1";";}')
+[ ! -z "$softether_path" ] && kill_ps "$softether_path"
 killall vpnserver softether_script.sh
 killall -9 vpnserver softether_script.sh
-eval $(ps -w | grep "_softether keep" | grep -v grep | awk '{print "kill "$1";";}')
-eval $(ps -w | grep "_softether.sh keep" | grep -v grep | awk '{print "kill "$1";";}')
-eval $(ps -w | grep "$scriptname keep" | grep -v grep | awk '{print "kill "$1";";}')
+rm -f /etc/storage/dnsmasq/dnsmasq.d/softether.conf
+restart_dhcpd
+kill_ps "/tmp/script/_softether"
+kill_ps "_softether.sh"
+kill_ps "$scriptname"
 }
 
 softether_start () {
@@ -159,19 +163,16 @@ fi
 softether_path="$SVC_PATH"
 logger -t "【softether】" "运行 softether_script"
 $softether_path stop
-/etc/storage/softether_script.sh &
-sleep 3
+eval "/etc/storage/softether_script.sh $cmd_log" &
+sleep 4
 [ ! -z "`pidof vpnserver`" ] && logger -t "【softether】" "启动成功" && softether_restart o
 [ -z "`pidof vpnserver`" ] && logger -t "【softether】" "启动失败, 注意检查hamcore.se2、vpncmd、vpnserver是否下载完整,10 秒后自动尝试重新启动" && sleep 10 && { rm -f $softether_path ; softether_restart x ; }
 
-logger -t "【softether】" "允许 500、4500、1701 udp端口通过防火墙"
-iptables -I INPUT -p udp --destination-port 500 -j ACCEPT
-iptables -I INPUT -p udp --destination-port 4500 -j ACCEPT
-iptables -I INPUT -p udp --destination-port 1701 -j ACCEPT
-
+softether_port_dpt
 initopt
 softether_get_status
 eval "$scriptfilepath keep &"
+exit 0
 }
 
 initopt () {
@@ -179,6 +180,61 @@ optPath=`grep ' /opt ' /proc/mounts | grep tmpfs`
 [ ! -z "$optPath" ] && return
 if [ ! -z "$(echo $scriptfilepath | grep -v "/opt/etc/init")" ] && [ -s "/opt/etc/init.d/rc.func" ] ; then
 	{ echo '#!/bin/sh' ; echo $scriptfilepath '"$@"' '&' ; } > /opt/etc/init.d/$scriptname && chmod 777  /opt/etc/init.d/$scriptname
+fi
+
+}
+
+initconfig () {
+
+	if [ ! -f "/etc/storage/softether_script.sh" ] || [ ! -s "/etc/storage/softether_script.sh" ] ; then
+cat > "/etc/storage/softether_script.sh" <<-\FOF
+#!/bin/sh
+export PATH='/opt/softether:/etc/storage/bin:/tmp/script:/etc/storage/script:/opt/usr/sbin:/opt/usr/bin:/opt/sbin:/opt/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin'
+export LD_LIBRARY_PATH=/lib:/opt/lib
+softether_path=`nvram get softether_path`
+[ -z $softether_path ] && softether_path=`which vpnserver` && nvram set softether_path=$softether_path
+SVC_PATH=$softether_path
+[ -f /opt/softether/vpn_server.config ] && [ ! -f /etc/storage/vpn_server.config ] && cp -f /opt/softether/vpn_server.config /etc/storage/vpn_server.config
+[ ! -f /etc/storage/vpn_server.config ] && touch /etc/storage/vpn_server.config
+ln -sf /etc/storage/vpn_server.config /opt/softether/vpn_server.config
+$SVC_PATH start 2>&1 &
+i=120
+until [ ! -z "$tap" ]
+do
+    i=$(($i-1))
+    tap=`ifconfig | grep tap_ | awk '{print $1}'`
+    if [ "$i" -lt 1 ];then
+        logger -t "【softether】" "错误：不能正确启动 vpnserver!"
+        rm -rf /etc/storage/dnsmasq/dnsmasq.d/softether.conf
+        restart_dhcpd
+        logger -t "【softether】" "错误：不能正确启动 vpnserver!"
+        [ -z "`pidof vpnserver`" ] && logger -t "【softether】" "启动失败, 注意检查hamcore.se2、vpncmd、vpnserver是否下载完整,10秒后自动尝试重新启动" && sleep 10 && nvram set softether_status=00 && /tmp/script/_softether &
+        exit
+    fi
+    sleep 1
+done
+
+logger -t "【softether】" "正确启动 vpnserver!"
+brctl addif br0 $tap
+echo interface=tap_vpn > /etc/storage/dnsmasq/dnsmasq.d/softether.conf
+restart_dhcpd
+mtd_storage.sh save &
+FOF
+chmod 777 "/etc/storage/softether_script.sh"
+	fi
+
+}
+
+initconfig
+
+softether_port_dpt () {
+
+port=$(iptables -t filter -L INPUT -v -n --line-numbers | grep dpt:500 | cut -d " " -f 1 | sort -nr | wc -l)
+if [ "$port" = 0 ] ; then
+	logger -t "【softether】" "允许 500、4500、1701 udp端口通过防火墙"
+	iptables -t filter -I INPUT -p udp --destination-port 500 -j ACCEPT
+	iptables -t filter -I INPUT -p udp --destination-port 4500 -j ACCEPT
+	iptables -t filter -I INPUT -p udp --destination-port 1701 -j ACCEPT
 fi
 
 }
